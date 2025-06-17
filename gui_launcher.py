@@ -16,6 +16,10 @@ import shlex
 import logging
 import json
 import requests # 新增导入
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 # --- Configuration & Globals ---
 PYTHON_EXECUTABLE = sys.executable
@@ -27,8 +31,8 @@ AUTH_PROFILES_DIR = os.path.join(SCRIPT_DIR, "auth_profiles") # 确保这些目�
 ACTIVE_AUTH_DIR = os.path.join(AUTH_PROFILES_DIR, "active")
 SAVED_AUTH_DIR = os.path.join(AUTH_PROFILES_DIR, "saved")
 
-DEFAULT_FASTAPI_PORT = 2048
-DEFAULT_CAMOUFOX_PORT_GUI = 9222 # 与 launch_camoufox.py 中的 DEFAULT_CAMOUFOX_PORT 一致
+DEFAULT_FASTAPI_PORT = int(os.environ.get('DEFAULT_FASTAPI_PORT', '2048'))
+DEFAULT_CAMOUFOX_PORT_GUI = int(os.environ.get('DEFAULT_CAMOUFOX_PORT', '9222'))  # 与 launch_camoufox.py 中的 DEFAULT_CAMOUFOX_PORT 一致
 
 managed_process_info: Dict[str, Any] = {
     "popen": None,
@@ -39,6 +43,28 @@ managed_process_info: Dict[str, Any] = {
     "output_area": None,
     "fully_detached": False # 新增：标记进程是否完全独立
 }
+
+# 添加按钮防抖机制
+button_debounce_info: Dict[str, float] = {}
+
+def debounce_button(func_name: str, delay_seconds: float = 2.0):
+    """
+    按钮防抖装饰器，防止在指定时间内重复执行同一函数
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            import time
+            current_time = time.time()
+            last_call_time = button_debounce_info.get(func_name, 0)
+
+            if current_time - last_call_time < delay_seconds:
+                logger.info(f"按钮防抖：忽略 {func_name} 的重复调用")
+                return
+
+            button_debounce_info[func_name] = current_time
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # 添加全局logger定义
 logger = logging.getLogger("GUILauncher")
@@ -220,15 +246,36 @@ LANG_TEXTS = {
     "current_auth_file_display_label": {"zh": "当前认证: ", "en": "Current Auth: "},
     "current_auth_file_none": {"zh": "无", "en": "None"},
     "current_auth_file_selected_format": {"zh": "{file}", "en": "{file}"},
-    "test_proxy_btn": {"zh": "测试代理连通性", "en": "Test Proxy Connectivity"},
+    "test_proxy_btn": {"zh": "测试", "en": "Test"},
+    "proxy_section_label": {"zh": "代理配置", "en": "Proxy Configuration"},
     "proxy_test_url_default": "http://httpbin.org/get", # 默认测试URL
+    "proxy_test_url_backup": "http://www.google.com", # 备用测试URL
     "proxy_not_enabled_warn": {"zh": "代理未启用或地址为空，请先配置。", "en": "Proxy not enabled or address is empty. Please configure first."},
     "proxy_test_success": {"zh": "代理连接成功 ({url})", "en": "Proxy connection successful ({url})"},
     "proxy_test_failure": {"zh": "代理连接失败 ({url}):\n{error}", "en": "Proxy connection failed ({url}):\n{error}"},
+    "proxy_testing_status": {"zh": "正在测试代理 {proxy_addr}...", "en": "Testing proxy {proxy_addr}..."},
+    "proxy_test_success_status": {"zh": "代理测试成功 ({url})", "en": "Proxy test successful ({url})"},
+    "proxy_test_failure_status": {"zh": "代理测试失败: {error}", "en": "Proxy test failed: {error}"},
+    "proxy_test_retrying": {"zh": "代理测试失败，正在重试 ({attempt}/{max_attempts})...", "en": "Proxy test failed, retrying ({attempt}/{max_attempts})..."},
+    "proxy_test_backup_url": {"zh": "主测试URL失败，尝试备用URL...", "en": "Primary test URL failed, trying backup URL..."},
+    "proxy_test_all_failed": {"zh": "所有代理测试尝试均失败", "en": "All proxy test attempts failed"},
     "querying_ports_status": {"zh": "正在查询端口: {ports_desc}...", "en": "Querying ports: {ports_desc}..."},
     "port_query_result_format": {"zh": "[{port_type} - {port_num}] {pid_info}", "en": "[{port_type} - {port_num}] {pid_info}"},
     "port_not_in_use_format": {"zh": "[{port_type} - {port_num}] 未被占用", "en": "[{port_type} - {port_num}] Not in use"},
-    "pids_on_multiple_ports_label": {"zh": "多端口占用情况:", "en": "Multi-Port Usage:"}
+    "pids_on_multiple_ports_label": {"zh": "多端口占用情况:", "en": "Multi-Port Usage:"},
+    "launch_llm_service_btn": {"zh": "启动本地LLM模拟服务", "en": "Launch Local LLM Mock Service"},
+    "stop_llm_service_btn": {"zh": "停止本地LLM模拟服务", "en": "Stop Local LLM Mock Service"},
+    "llm_service_name_key": {"zh": "本地LLM模拟服务", "en": "Local LLM Mock Service"},
+    "status_llm_starting": {"zh": "本地LLM模拟服务启动中 (PID: {pid})...", "en": "Local LLM Mock Service starting (PID: {pid})..."},
+    "status_llm_stopped": {"zh": "本地LLM模拟服务已停止。", "en": "Local LLM Mock Service stopped."},
+    "status_llm_stop_error": {"zh": "停止本地LLM模拟服务时出错。", "en": "Error stopping Local LLM Mock Service."},
+    "status_llm_already_running": {"zh": "本地LLM模拟服务已在运行 (PID: {pid})。", "en": "Local LLM Mock Service is already running (PID: {pid})."},
+    "status_llm_not_running": {"zh": "本地LLM模拟服务未在运行。", "en": "Local LLM Mock Service is not running."},
+    "status_llm_backend_check": {"zh": "正在检查LLM后端服务 ...", "en": "Checking LLM backend service ..."},
+    "status_llm_backend_ok_starting": {"zh": "LLM后端服务 (localhost:{port}) 正常，正在启动模拟服务...", "en": "LLM backend service (localhost:{port}) OK, starting mock service..."},
+    "status_llm_backend_fail": {"zh": "LLM后端服务 (localhost:{port}) 未响应，无法启动模拟服务。", "en": "LLM backend service (localhost:{port}) not responding, cannot start mock service."},
+    "confirm_stop_llm_title": {"zh": "确认停止LLM服务", "en": "Confirm Stop LLM Service"},
+    "confirm_stop_llm_message": {"zh": "确定要停止本地LLM模拟服务吗?", "en": "Are you sure you want to stop the Local LLM Mock Service?"}
 }
 
 # 删除重复的定义
@@ -244,6 +291,15 @@ proxy_address_var: Optional[tk.StringVar] = None  # 添加变量存储代理地�
 proxy_enabled_var: Optional[tk.BooleanVar] = None  # 添加变量标记代理是否启用
 active_auth_file_display_var: Optional[tk.StringVar] = None # 用于显示当前认证文件
 
+LLM_PY_FILENAME = "llm.py"
+llm_service_process_info: Dict[str, Any] = {
+    "popen": None,
+    "monitor_thread": None,
+    "stdout_thread": None,
+    "stderr_thread": None,
+    "service_name_key": "llm_service_name_key" # Corresponds to a LANG_TEXTS key
+}
+
 # 将所有辅助函数定义移到 build_gui 之前
 
 def get_text(key: str, **kwargs) -> str:
@@ -255,17 +311,24 @@ def get_text(key: str, **kwargs) -> str:
 
 def update_status_bar(message_key: str, **kwargs):
     message = get_text(message_key, **kwargs)
-    if process_status_text_var:
-        process_status_text_var.set(message)
-    if managed_process_info.get("output_area"):
-        def _update_output():
-            current_message = message
-            if managed_process_info.get("output_area") and root_widget:
-                managed_process_info["output_area"].config(state=tk.NORMAL)
-                managed_process_info["output_area"].insert(tk.END, f"[STATUS] {current_message}\n")
-                managed_process_info["output_area"].see(tk.END)
-                managed_process_info["output_area"].config(state=tk.DISABLED)
-        if root_widget: root_widget.after_idle(_update_output)
+    
+    def _perform_gui_updates():
+        # Update the status bar label's text variable
+        if process_status_text_var:
+            process_status_text_var.set(message)
+
+        # Update the main log text area (if it exists)
+        if managed_process_info.get("output_area"):
+            # The 'message' variable is captured from the outer scope (closure)
+            if root_widget: # Ensure root_widget is still valid
+                output_area_widget = managed_process_info["output_area"]
+                output_area_widget.config(state=tk.NORMAL)
+                output_area_widget.insert(tk.END, f"[STATUS] {message}\n")
+                output_area_widget.see(tk.END)
+                output_area_widget.config(state=tk.DISABLED)
+                
+    if root_widget:
+        root_widget.after_idle(_perform_gui_updates)
 
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -637,7 +700,7 @@ def get_active_auth_json_path_for_launch() -> Optional[str]:
 
 def build_launch_command(mode, fastapi_port, camoufox_debug_port, stream_port_enabled, stream_port, helper_enabled, helper_endpoint):
     cmd = [PYTHON_EXECUTABLE, LAUNCH_CAMOUFOX_PY, f"--{mode}", "--server-port", str(fastapi_port), "--camoufox-debug-port", str(camoufox_debug_port)]
-    
+
     active_auth_path = get_active_auth_json_path_for_launch()
     if active_auth_path:
         cmd.extend(["--active-auth-json", active_auth_path])
@@ -649,12 +712,26 @@ def build_launch_command(mode, fastapi_port, camoufox_debug_port, stream_port_en
         cmd.extend(["--stream-port", str(stream_port)])
     else:
         cmd.extend(["--stream-port", "0"]) # 显式传递0表示禁用
-        
+
     if helper_enabled and helper_endpoint:
         cmd.extend(["--helper", helper_endpoint])
     else:
         cmd.extend(["--helper", ""]) # 显式传递空字符串表示禁用
-        
+
+    # 修复：添加统一代理配置参数传递
+    # 使用 --internal-camoufox-proxy 参数确保最高优先级，而不是仅依赖环境变量
+    if proxy_enabled_var.get():
+        proxy_addr = proxy_address_var.get().strip()
+        if proxy_addr:
+            cmd.extend(["--internal-camoufox-proxy", proxy_addr])
+            logger.info(f"将使用GUI配置的代理: {proxy_addr}")
+        else:
+            cmd.extend(["--internal-camoufox-proxy", ""])
+            logger.info("GUI代理已启用但地址为空，明确禁用代理")
+    else:
+        cmd.extend(["--internal-camoufox-proxy", ""])
+        logger.info("GUI代理未启用，明确禁用代理")
+
     return cmd
 
 # --- GUI构建与主逻辑区段的函数定义 ---
@@ -744,15 +821,15 @@ def get_camoufox_debug_port_from_gui() -> int:
 # 配置文件路径
 CONFIG_FILE_PATH = os.path.join(SCRIPT_DIR, "gui_config.json")
 
-# 默认配置
+# 默认配置 - 从环境变量读取，如果没有则使用硬编码默认值
 DEFAULT_CONFIG = {
     "fastapi_port": DEFAULT_FASTAPI_PORT,
     "camoufox_debug_port": DEFAULT_CAMOUFOX_PORT_GUI,
-    "stream_port": 3120,
+    "stream_port": int(os.environ.get('GUI_DEFAULT_STREAM_PORT', '3120')),
     "stream_port_enabled": True,
-    "helper_endpoint": "",
+    "helper_endpoint": os.environ.get('GUI_DEFAULT_HELPER_ENDPOINT', ''),
     "helper_enabled": False,
-    "proxy_address": "http://127.0.0.1:7890",
+    "proxy_address": os.environ.get('GUI_DEFAULT_PROXY_ADDRESS', 'http://127.0.0.1:7890'),
     "proxy_enabled": False
 }
 
@@ -802,12 +879,16 @@ def reset_to_defaults():
         messagebox.showinfo(get_text("info_title"), get_text("reset_success"), parent=root_widget)
 
 def _configure_proxy_env_vars() -> Dict[str, str]:
+    """
+    配置代理环境变量（已弃用，现在主要通过 --internal-camoufox-proxy 参数传递）
+    保留此函数以维持向后兼容性，但现在主要用于状态显示
+    """
     proxy_env = {}
     if proxy_enabled_var.get():
-        proxy_addr = proxy_address_var.get()
+        proxy_addr = proxy_address_var.get().strip()
         if proxy_addr:
-            proxy_env["HTTP_PROXY"] = proxy_addr
-            proxy_env["HTTPS_PROXY"] = proxy_addr
+            # 注意：现在主要通过 --internal-camoufox-proxy 参数传递代理配置
+            # 环境变量作为备用方案，但优先级较低
             update_status_bar("proxy_configured_status", proxy_addr=proxy_addr)
         else:
             update_status_bar("proxy_skip_status")
@@ -893,10 +974,16 @@ def _launch_process_gui(cmd: List[str], service_name_key: str, env_vars: Optiona
         applescript_arg_escaped = shell_command_str.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"')
         
         # Construct the AppleScript command
-        # Using "tell application ..." is slightly more robust/standard
-        applescript_command = f'tell application "Terminal" to do script "{applescript_arg_escaped}" activate'
-        
-        launch_cmd_for_terminal = ["osascript", "-e", applescript_command]
+        # 修复：使用简化的AppleScript命令避免AppleEvent处理程序失败
+        # 直接创建新窗口并执行命令，避免复杂的条件判断
+        applescript_command = f'''
+        tell application "Terminal"
+            do script "{applescript_arg_escaped}"
+            activate
+        end tell
+        '''
+
+        launch_cmd_for_terminal = ["osascript", "-e", applescript_command.strip()]
     elif system == "Linux":
         import shutil
         terminal_emulator = shutil.which("x-terminal-emulator") or shutil.which("gnome-terminal") or shutil.which("konsole") or shutil.which("xfce4-terminal") or shutil.which("xterm")
@@ -971,6 +1058,7 @@ def _launch_process_gui(cmd: List[str], service_name_key: str, env_vars: Optiona
         update_status_bar("status_error_starting", service_name=service_name)
         logger.error(f"Error in _launch_process_gui for {service_name}: {e}", exc_info=True)
 
+@debounce_button("start_headed_interactive", 3.0)
 def start_headed_interactive_gui():
     launch_params = _get_launch_parameters()
     if not launch_params: return
@@ -1004,6 +1092,7 @@ def start_headed_interactive_gui():
     update_status_bar("status_headed_launch")
     _launch_process_gui(cmd, "service_name_headed_interactive", env_vars=proxy_env)
 
+@debounce_button("start_headless", 3.0)
 def start_headless_gui():
     launch_params = _get_launch_parameters()
     if not launch_params: return
@@ -1037,6 +1126,7 @@ def start_headless_gui():
     update_status_bar("status_headless_launch")
     _launch_process_gui(cmd, "service_name_headless", env_vars=proxy_env)
 
+@debounce_button("start_virtual_display", 3.0)
 def start_virtual_display_gui():
     if platform.system() != "Linux":
         messagebox.showwarning(get_text("warning_title"), "虚拟显示模式仅在Linux上受支持。")
@@ -1073,6 +1163,251 @@ def start_virtual_display_gui():
     )
     update_status_bar("status_virtual_display_launch")
     _launch_process_gui(cmd, "service_name_virtual_display", env_vars=proxy_env)
+
+# --- LLM Mock Service Management ---
+
+def is_llm_service_running() -> bool:
+    """检查本地LLM模拟服务是否正在运行"""
+    return llm_service_process_info.get("popen") and \
+           llm_service_process_info["popen"].poll() is None
+
+def monitor_llm_process_thread_target():
+    """监控LLM服务进程，捕获输出并更新状态"""
+    popen = llm_service_process_info.get("popen")
+    service_name_key = llm_service_process_info.get("service_name_key") # "llm_service_name_key"
+    output_area = managed_process_info.get("output_area") # Use the main output area
+
+    if not popen or not service_name_key or not output_area:
+        logger.error("LLM monitor thread: Popen, service_name_key, or output_area is None.")
+        return
+
+    service_name = get_text(service_name_key)
+    logger.info(f"Starting monitor thread for {service_name} (PID: {popen.pid})")
+
+    # stdout/stderr redirection
+    if popen.stdout:
+        llm_service_process_info["stdout_thread"] = threading.Thread(
+            target=enqueue_stream_output, args=(popen.stdout, f"{service_name}-stdout"), daemon=True
+        )
+        llm_service_process_info["stdout_thread"].start()
+    
+    if popen.stderr:
+        llm_service_process_info["stderr_thread"] = threading.Thread(
+            target=enqueue_stream_output, args=(popen.stderr, f"{service_name}-stderr"), daemon=True
+        )
+        llm_service_process_info["stderr_thread"].start()
+
+    popen.wait() # Wait for the process to terminate
+    exit_code = popen.returncode
+    logger.info(f"{service_name} (PID: {popen.pid}) terminated with exit code {exit_code}.")
+
+    if llm_service_process_info.get("stdout_thread") and llm_service_process_info["stdout_thread"].is_alive():
+        llm_service_process_info["stdout_thread"].join(timeout=1)
+    if llm_service_process_info.get("stderr_thread") and llm_service_process_info["stderr_thread"].is_alive():
+        llm_service_process_info["stderr_thread"].join(timeout=1)
+
+    # Update status only if this was the process we were tracking
+    if llm_service_process_info.get("popen") == popen:
+        update_status_bar("status_llm_stopped")
+        llm_service_process_info["popen"] = None
+        llm_service_process_info["monitor_thread"] = None
+        llm_service_process_info["stdout_thread"] = None
+        llm_service_process_info["stderr_thread"] = None
+
+def _actually_launch_llm_service():
+    """实际启动 llm.py 脚本"""
+    global llm_service_process_info
+    service_name_key = "llm_service_name_key"
+    service_name = get_text(service_name_key)
+    output_area = managed_process_info.get("output_area")
+
+    if not output_area:
+        logger.error("Cannot launch LLM service: Main output area is not available.")
+        update_status_bar("status_error_starting", service_name=service_name)
+        return
+
+    llm_script_path = os.path.join(SCRIPT_DIR, LLM_PY_FILENAME)
+    if not os.path.exists(llm_script_path):
+        messagebox.showerror(get_text("error_title"), get_text("startup_script_not_found_msgbox", script=LLM_PY_FILENAME))
+        update_status_bar("status_script_not_found", service_name=service_name)
+        return
+
+    # Get the main server port from GUI to pass to llm.py
+    main_server_port = get_fastapi_port_from_gui() # Ensure this function is available and returns the correct port
+
+    cmd = [PYTHON_EXECUTABLE, llm_script_path, f"--main-server-port={main_server_port}"]
+    logger.info(f"Attempting to launch LLM service with command: {' '.join(cmd)}")
+
+    try:
+        # Clear previous LLM service output if any, or add a header
+        output_area.config(state=tk.NORMAL)
+        output_area.insert(tk.END, f"--- Starting {service_name} ---\n")
+        output_area.config(state=tk.DISABLED)
+        
+        effective_env = os.environ.copy()
+        effective_env['PYTHONUNBUFFERED'] = '1' # Ensure unbuffered output for real-time logging
+        effective_env['PYTHONIOENCODING'] = 'utf-8'
+
+        popen = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False, # Read as bytes for enqueue_stream_output
+            cwd=SCRIPT_DIR,
+            env=effective_env,
+            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+        )
+        llm_service_process_info["popen"] = popen
+        llm_service_process_info["service_name_key"] = service_name_key
+        
+        update_status_bar("status_llm_starting", pid=popen.pid)
+        logger.info(f"{service_name} started with PID: {popen.pid}")
+
+        # Start monitoring thread
+        monitor_thread = threading.Thread(target=monitor_llm_process_thread_target, daemon=True)
+        llm_service_process_info["monitor_thread"] = monitor_thread
+        monitor_thread.start()
+
+    except FileNotFoundError:
+        messagebox.showerror(get_text("error_title"), get_text("script_not_found_error_msgbox", cmd=' '.join(cmd)))
+        update_status_bar("status_script_not_found", service_name=service_name)
+        logger.error(f"FileNotFoundError when trying to launch LLM service: {cmd}")
+    except Exception as e:
+        messagebox.showerror(get_text("error_title"), f"{service_name} - {get_text('error_title')}: {e}")
+        update_status_bar("status_error_starting", service_name=service_name)
+        logger.error(f"Exception when launching LLM service: {e}", exc_info=True)
+        llm_service_process_info["popen"] = None # Ensure it's cleared on failure
+
+def _check_llm_backend_and_launch_thread():
+    """检查LLM后端服务 (动态端口) 并在成功后启动llm.py"""
+    # Get the current FastAPI port from the GUI
+    # This needs to be called within this thread, right before the check,
+    # as port_entry_var might be accessed from a different thread if called outside.
+    # However, Tkinter GUI updates should ideally be done from the main thread.
+    # For reading a StringVar, it's generally safe.
+    current_fastapi_port = get_fastapi_port_from_gui()
+
+    # Update status bar and logger with the dynamic port
+    # For status bar updates from a thread, it's better to use root_widget.after or a queue,
+    # but for simplicity in this context, direct update_status_bar call is used.
+    # Ensure update_status_bar is thread-safe or schedules GUI updates.
+    # The existing update_status_bar uses root_widget.after_idle, which is good.
+    
+    # Dynamically create the message keys for status bar to include the port
+    backend_check_msg_key = "status_llm_backend_check" # Original key
+    backend_ok_msg_key = "status_llm_backend_ok_starting"
+    backend_fail_msg_key = "status_llm_backend_fail"
+    
+    # It's better to pass the port as a parameter to get_text if the LANG_TEXTS are updated
+    # For now, we'll just log the dynamic port separately.
+    update_status_bar(backend_check_msg_key) # Still uses the generic message
+    logger.info(f"Checking LLM backend service at localhost:{current_fastapi_port}...")
+    
+    backend_ok = False
+    try:
+        with socket.create_connection(("localhost", current_fastapi_port), timeout=3) as sock:
+            backend_ok = True
+        logger.info(f"LLM backend service (localhost:{current_fastapi_port}) is responsive.")
+    except (socket.timeout, ConnectionRefusedError, OSError) as e:
+        logger.warning(f"LLM backend service (localhost:{current_fastapi_port}) not responding: {e}")
+        backend_ok = False
+    
+    if root_widget: # Ensure GUI is still there
+        if backend_ok:
+            update_status_bar(backend_ok_msg_key, port=current_fastapi_port) # Pass port to fill placeholder
+            _actually_launch_llm_service() # This already gets the port via get_fastapi_port_from_gui()
+        else:
+            # Update status bar with the dynamic port for failure message
+            update_status_bar(backend_fail_msg_key, port=current_fastapi_port)
+            
+            # Show warning messagebox with the dynamic port
+            # The status bar is already updated by update_status_bar,
+            # so no need to manually set process_status_text_var or write to output_area here again for the same message.
+            # The update_status_bar function handles writing to the output_area if configured.
+            messagebox.showwarning(
+                get_text("warning_title"),
+                get_text(backend_fail_msg_key, port=current_fastapi_port), # Use get_text with port for the messagebox
+                parent=root_widget
+            )
+
+def start_llm_service_gui():
+    """GUI命令：启动本地LLM模拟服务"""
+    if is_llm_service_running():
+        pid = llm_service_process_info["popen"].pid
+        update_status_bar("status_llm_already_running", pid=pid)
+        messagebox.showinfo(get_text("info_title"), get_text("status_llm_already_running", pid=pid), parent=root_widget)
+        return
+
+    # Run the check and actual launch in a new thread to keep GUI responsive
+    # The check itself can take a few seconds if the port is unresponsive.
+    threading.Thread(target=_check_llm_backend_and_launch_thread, daemon=True).start()
+
+def stop_llm_service_gui():
+    """GUI命令：停止本地LLM模拟服务"""
+    service_name = get_text(llm_service_process_info.get("service_name_key", "llm_service_name_key"))
+    popen = llm_service_process_info.get("popen")
+
+    if not popen or popen.poll() is not None:
+        update_status_bar("status_llm_not_running")
+        # messagebox.showinfo(get_text("info_title"), get_text("status_llm_not_running"), parent=root_widget)
+        return
+
+    if messagebox.askyesno(get_text("confirm_stop_llm_title"), get_text("confirm_stop_llm_message"), parent=root_widget):
+        logger.info(f"Attempting to stop {service_name} (PID: {popen.pid})")
+        update_status_bar("status_stopping_service", service_name=service_name, pid=popen.pid)
+        
+        try:
+            # Attempt graceful termination first
+            if platform.system() == "Windows":
+                # On Windows, sending SIGINT to a Popen object created with CREATE_NO_WINDOW
+                # might not work as expected for Flask apps. taskkill is more reliable.
+                # We can try to send Ctrl+C to the console if it had one, but llm.py is simple.
+                # For Flask, direct popen.terminate() or popen.kill() is often used.
+                logger.info(f"Sending SIGTERM/terminate to {service_name} (PID: {popen.pid}) on Windows.")
+                popen.terminate() # Sends SIGTERM on Unix, TerminateProcess on Windows
+            else: # Linux/macOS
+                logger.info(f"Sending SIGINT to {service_name} (PID: {popen.pid}) on {platform.system()}.")
+                popen.send_signal(signal.SIGINT)
+
+            # Wait for a short period for graceful shutdown
+            try:
+                popen.wait(timeout=5) # Wait up to 5 seconds
+                logger.info(f"{service_name} (PID: {popen.pid}) terminated gracefully after signal.")
+                update_status_bar("status_llm_stopped")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"{service_name} (PID: {popen.pid}) did not terminate after signal. Forcing kill.")
+                popen.kill() # Force kill
+                popen.wait(timeout=2) # Wait for kill to take effect
+                update_status_bar("status_llm_stopped") # Assume killed
+                logger.info(f"{service_name} (PID: {popen.pid}) was force-killed.")
+            
+        except Exception as e:
+            logger.error(f"Error stopping {service_name} (PID: {popen.pid}): {e}", exc_info=True)
+            update_status_bar("status_llm_stop_error")
+            messagebox.showerror(get_text("error_title"), f"Error stopping {service_name}: {e}", parent=root_widget)
+        finally:
+            # Ensure threads are joined and resources cleaned up, even if already done by monitor
+            if llm_service_process_info.get("stdout_thread") and llm_service_process_info["stdout_thread"].is_alive():
+                llm_service_process_info["stdout_thread"].join(timeout=0.5)
+            if llm_service_process_info.get("stderr_thread") and llm_service_process_info["stderr_thread"].is_alive():
+                llm_service_process_info["stderr_thread"].join(timeout=0.5)
+            
+            llm_service_process_info["popen"] = None
+            llm_service_process_info["monitor_thread"] = None
+            llm_service_process_info["stdout_thread"] = None
+            llm_service_process_info["stderr_thread"] = None
+            
+            # Clear related output from the main log area or add a "stopped" message
+            output_area = managed_process_info.get("output_area")
+            if output_area:
+                output_area.config(state=tk.NORMAL)
+                output_area.insert(tk.END, f"--- {service_name} stopped ---\n")
+                output_area.see(tk.END)
+                output_area.config(state=tk.DISABLED)
+    else:
+        logger.info(f"User cancelled stopping {service_name}.")
+
+# --- End LLM Mock Service Management ---
 
 def query_port_and_display_pids_gui():
     ports_to_query_info = []
@@ -1137,39 +1472,135 @@ def query_port_and_display_pids_gui():
     else:
         logger.error("pid_listbox_widget or pid_list_lbl_frame_ref is None in query_port_and_display_pids_gui")
 
-def _perform_proxy_test(proxy_address: str, test_url: str) -> Tuple[bool, str]:
+def _perform_proxy_test_single(proxy_address: str, test_url: str, timeout: int = 15) -> Tuple[bool, str, int]:
     """
-    Tries to connect to test_url via proxy_address.
-    Returns (success_status, message_or_error_string).
+    单次代理测试尝试
+    Returns (success_status, message_or_error_string, status_code).
     """
     proxies = {
         "http": proxy_address,
         "https": proxy_address,
     }
     try:
-        logger.info(f"Testing proxy {proxy_address} with URL {test_url}")
-        response = requests.get(test_url, proxies=proxies, timeout=10, allow_redirects=True)
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
-        logger.info(f"Proxy test to {test_url} via {proxy_address} successful. Status: {response.status_code}")
-        return True, get_text("proxy_test_success", url=test_url)
+        logger.info(f"Testing proxy {proxy_address} with URL {test_url} (timeout: {timeout}s)")
+        response = requests.get(test_url, proxies=proxies, timeout=timeout, allow_redirects=True)
+        status_code = response.status_code
+
+        # 检查HTTP状态码
+        if 200 <= status_code < 300:
+            logger.info(f"Proxy test to {test_url} via {proxy_address} successful. Status: {status_code}")
+            return True, get_text("proxy_test_success", url=test_url), status_code
+        elif status_code == 503:
+            # 503 Service Unavailable - 可能是临时性问题
+            logger.warning(f"Proxy test got 503 Service Unavailable from {test_url} via {proxy_address}")
+            return False, f"HTTP {status_code}: Service Temporarily Unavailable", status_code
+        elif 400 <= status_code < 500:
+            # 4xx 客户端错误
+            logger.warning(f"Proxy test got client error {status_code} from {test_url} via {proxy_address}")
+            return False, f"HTTP {status_code}: Client Error", status_code
+        elif 500 <= status_code < 600:
+            # 5xx 服务器错误
+            logger.warning(f"Proxy test got server error {status_code} from {test_url} via {proxy_address}")
+            return False, f"HTTP {status_code}: Server Error", status_code
+        else:
+            logger.warning(f"Proxy test got unexpected status {status_code} from {test_url} via {proxy_address}")
+            return False, f"HTTP {status_code}: Unexpected Status", status_code
+
     except requests.exceptions.ProxyError as e:
         logger.error(f"ProxyError connecting to {test_url} via {proxy_address}: {e}")
-        return False, get_text("proxy_test_failure", url=test_url, error=f"Proxy Error: {e}")
+        return False, f"Proxy Error: {e}", 0
     except requests.exceptions.ConnectTimeout as e:
         logger.error(f"ConnectTimeout connecting to {test_url} via {proxy_address}: {e}")
-        return False, get_text("proxy_test_failure", url=test_url, error=f"Connection Timeout: {e}")
+        return False, f"Connection Timeout: {e}", 0
     except requests.exceptions.ReadTimeout as e:
         logger.error(f"ReadTimeout from {test_url} via {proxy_address}: {e}")
-        return False, get_text("proxy_test_failure", url=test_url, error=f"Read Timeout: {e}")
+        return False, f"Read Timeout: {e}", 0
     except requests.exceptions.SSLError as e:
         logger.error(f"SSLError connecting to {test_url} via {proxy_address}: {e}")
-        return False, get_text("proxy_test_failure", url=test_url, error=f"SSL Error: {e}")
+        return False, f"SSL Error: {e}", 0
     except requests.exceptions.RequestException as e:
         logger.error(f"RequestException connecting to {test_url} via {proxy_address}: {e}")
-        return False, get_text("proxy_test_failure", url=test_url, error=str(e))
+        return False, str(e), 0
     except Exception as e: # Catch any other unexpected errors
         logger.error(f"Unexpected error during proxy test to {test_url} via {proxy_address}: {e}", exc_info=True)
-        return False, get_text("proxy_test_failure", url=test_url, error=f"Unexpected error: {e}")
+        return False, f"Unexpected error: {e}", 0
+
+def _perform_proxy_test(proxy_address: str, test_url: str) -> Tuple[bool, str]:
+    """
+    增强的代理测试函数，包含重试机制和备用URL
+    Returns (success_status, message_or_error_string).
+    """
+    max_attempts = 3
+    backup_url = LANG_TEXTS["proxy_test_url_backup"]
+    urls_to_try = [test_url]
+
+    # 如果主URL不是备用URL，则添加备用URL
+    if test_url != backup_url:
+        urls_to_try.append(backup_url)
+
+    for url_index, current_url in enumerate(urls_to_try):
+        if url_index > 0:
+            logger.info(f"Trying backup URL: {current_url}")
+            update_status_bar("proxy_test_backup_url")
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                logger.info(f"Retrying proxy test (attempt {attempt}/{max_attempts})")
+                update_status_bar("proxy_test_retrying", attempt=attempt, max_attempts=max_attempts)
+                time.sleep(2)  # 重试前等待2秒
+
+            success, error_msg, status_code = _perform_proxy_test_single(proxy_address, current_url)
+
+            if success:
+                return True, get_text("proxy_test_success", url=current_url)
+
+            # 如果是503错误或超时，值得重试
+            should_retry = (
+                status_code == 503 or
+                "timeout" in error_msg.lower() or
+                "temporarily unavailable" in error_msg.lower()
+            )
+
+            if not should_retry:
+                # 对于非临时性错误，不重试，直接尝试下一个URL
+                logger.info(f"Non-retryable error for {current_url}: {error_msg}")
+                break
+
+            if attempt == max_attempts:
+                logger.warning(f"All {max_attempts} attempts failed for {current_url}: {error_msg}")
+
+    # 所有URL和重试都失败了
+    return False, get_text("proxy_test_all_failed")
+
+def _proxy_test_thread(proxy_addr: str, test_url: str):
+    """在后台线程中执行代理测试"""
+    try:
+        success, message = _perform_proxy_test(proxy_addr, test_url)
+
+        # 在主线程中更新GUI
+        def update_gui():
+            if success:
+                messagebox.showinfo(get_text("info_title"), message, parent=root_widget)
+                update_status_bar("proxy_test_success_status", url=test_url)
+            else:
+                messagebox.showerror(get_text("error_title"),
+                                   get_text("proxy_test_failure", url=test_url, error=message),
+                                   parent=root_widget)
+                update_status_bar("proxy_test_failure_status", error=message)
+
+        if root_widget:
+            root_widget.after_idle(update_gui)
+
+    except Exception as e:
+        logger.error(f"Proxy test thread error: {e}", exc_info=True)
+        def show_error():
+            messagebox.showerror(get_text("error_title"),
+                               f"代理测试过程中发生错误: {e}",
+                               parent=root_widget)
+            update_status_bar("proxy_test_failure_status", error=str(e))
+
+        if root_widget:
+            root_widget.after_idle(show_error)
 
 def test_proxy_connectivity_gui():
     if not proxy_enabled_var.get() or not proxy_address_var.get().strip():
@@ -1179,17 +1610,16 @@ def test_proxy_connectivity_gui():
     proxy_addr_to_test = proxy_address_var.get().strip()
     test_url = LANG_TEXTS["proxy_test_url_default"] # Use the default from LANG_TEXTS
 
-    update_status_bar("status_idle") # Clear previous status
-    # Show a temporary "testing" message if desired, or rely on messagebox
-    # process_status_text_var.set(f"Testing proxy {proxy_addr_to_test} with {test_url}...")
+    # 显示测试开始状态
+    update_status_bar("proxy_testing_status", proxy_addr=proxy_addr_to_test)
 
-    success, message = _perform_proxy_test(proxy_addr_to_test, test_url)
-
-    if success:
-        messagebox.showinfo(get_text("info_title"), message, parent=root_widget)
-    else:
-        messagebox.showerror(get_text("error_title"), message, parent=root_widget)
-    # update_status_bar("status_idle") # Reset status after test
+    # 在后台线程中执行测试，避免阻塞GUI
+    test_thread = threading.Thread(
+        target=_proxy_test_thread,
+        args=(proxy_addr_to_test, test_url),
+        daemon=True
+    )
+    test_thread.start()
 
 def stop_selected_pid_from_list_gui():
     if not pid_listbox_widget: return
@@ -1414,10 +1844,11 @@ def build_gui(root: tk.Tk):
     proxy_enabled_var = tk.BooleanVar(value=config.get("proxy_enabled", False))
     active_auth_file_display_var = tk.StringVar() # 初始化为空，后续由 _update_active_auth_display 更新
 
-    # 联动逻辑：当流式代理启用时，强制启用浏览器代理
+    # 联动逻辑：移除强制启用代理的逻辑，现在代理配置更加灵活
+    # 用户可以根据需要独立配置流式代理和浏览器代理
     def on_stream_proxy_toggle(*args):
-        if stream_port_enabled_var.get():
-            proxy_enabled_var.set(True)
+        # 不再强制启用代理，用户可以自由选择
+        pass
     stream_port_enabled_var.trace_add("write", on_stream_proxy_toggle)
 
 
@@ -1505,19 +1936,34 @@ def build_gui(root: tk.Tk):
     entry_helper_endpoint = ttk.Entry(helper_details_frame, textvariable=helper_endpoint_var)
     entry_helper_endpoint.pack(side=tk.LEFT, fill=tk.X, expand=True)
     
-    # 浏览器代理设置
-    proxy_frame_outer = ttk.Frame(port_section)
-    proxy_frame_outer.pack(fill=tk.X, padx=5, pady=3)
-    proxy_checkbox = ttk.Checkbutton(proxy_frame_outer, variable=proxy_enabled_var, text="")
-    proxy_checkbox.pack(side=tk.LEFT, padx=(0,2))
+    # 添加分隔符
+    ttk.Separator(port_section, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=5, pady=(8,5))
+
+    # 代理配置部分 - 独立的LabelFrame
+    proxy_section = ttk.LabelFrame(port_section, text="")
+    proxy_section.pack(fill=tk.X, padx=5, pady=(5,8))
+    widgets_to_translate.append({"widget": proxy_section, "key": "proxy_section_label", "property": "text"})
+
+    # 代理启用复选框
+    proxy_enable_frame = ttk.Frame(proxy_section)
+    proxy_enable_frame.pack(fill=tk.X, padx=5, pady=(5,3))
+    proxy_checkbox = ttk.Checkbutton(proxy_enable_frame, variable=proxy_enabled_var, text="")
+    proxy_checkbox.pack(side=tk.LEFT)
     widgets_to_translate.append({"widget": proxy_checkbox, "key": "enable_proxy_label", "property": "text"})
-    proxy_details_frame = ttk.Frame(proxy_frame_outer)
-    proxy_details_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-    lbl_proxy_address = ttk.Label(proxy_details_frame, text="")
+
+    # 代理地址输入
+    proxy_address_frame = ttk.Frame(proxy_section)
+    proxy_address_frame.pack(fill=tk.X, padx=5, pady=(0,5))
+    lbl_proxy_address = ttk.Label(proxy_address_frame, text="")
     lbl_proxy_address.pack(side=tk.LEFT, padx=(0,5))
     widgets_to_translate.append({"widget": lbl_proxy_address, "key": "proxy_address_label"})
-    entry_proxy_address = ttk.Entry(proxy_details_frame, textvariable=proxy_address_var)
-    entry_proxy_address.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    entry_proxy_address = ttk.Entry(proxy_address_frame, textvariable=proxy_address_var)
+    entry_proxy_address.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5))
+
+    # 代理测试按钮
+    btn_test_proxy_inline = ttk.Button(proxy_address_frame, text="", command=test_proxy_connectivity_gui, width=8)
+    btn_test_proxy_inline.pack(side=tk.RIGHT)
+    widgets_to_translate.append({"widget": btn_test_proxy_inline, "key": "test_proxy_btn"})
     
     # Port auto check
     port_auto_check_frame = ttk.Frame(port_section)
@@ -1546,30 +1992,25 @@ def build_gui(root: tk.Tk):
     widgets_to_translate.append({"widget": btn_virtual_display, "key": "launch_virtual_display_btn"})
     if platform.system() != "Linux":
         btn_virtual_display.state(['disabled'])
+
+    # Separator for LLM service buttons
+    ttk.Separator(launch_options_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=5, pady=(8,5))
+
+    # LLM Service Buttons
+    btn_start_llm_service = ttk.Button(launch_options_frame, text="", command=start_llm_service_gui)
+    btn_start_llm_service.pack(fill=tk.X, padx=5, pady=3)
+    widgets_to_translate.append({"widget": btn_start_llm_service, "key": "launch_llm_service_btn"})
+
+    btn_stop_llm_service = ttk.Button(launch_options_frame, text="", command=stop_llm_service_gui)
+    btn_stop_llm_service.pack(fill=tk.X, padx=5, pady=3)
+    widgets_to_translate.append({"widget": btn_stop_llm_service, "key": "stop_llm_service_btn"})
     
     # 移除不再有用的"停止当前GUI管理的服务"按钮
     # btn_stop_service = ttk.Button(launch_options_frame, text="", command=stop_managed_service_gui)
     # btn_stop_service.pack(fill=tk.X, padx=5, pady=3)
     # widgets_to_translate.append({"widget": btn_stop_service, "key": "stop_gui_service_btn"})
     
-    # 认证文件管理 (移到左栏底部)
-    auth_section_left = ttk.LabelFrame(left_frame_container, text="") # 重命名以区分
-    auth_section_left.grid(row=left_current_row, column=0, sticky="ew", padx=2, pady=5)
-    widgets_to_translate.append({"widget": auth_section_left, "key": "auth_files_management", "property": "text"})
-    left_current_row += 1
-    btn_manage_auth_left = ttk.Button(auth_section_left, text="", command=manage_auth_files_gui) # 重命名按钮
-    btn_manage_auth_left.pack(fill=tk.X, padx=5, pady=5)
-    widgets_to_translate.append({"widget": btn_manage_auth_left, "key": "manage_auth_files_btn"})
-    
-    # 显示当前认证文件
-    auth_display_frame = ttk.Frame(auth_section_left) # 放在认证管理部分内部
-    auth_display_frame.pack(fill=tk.X, padx=5, pady=(0,5)) # 调整pady使其更紧凑
-    lbl_current_auth_static = ttk.Label(auth_display_frame, text="")
-    lbl_current_auth_static.pack(side=tk.LEFT)
-    widgets_to_translate.append({"widget": lbl_current_auth_static, "key": "current_auth_file_display_label"})
-    lbl_current_auth_dynamic = ttk.Label(auth_display_frame, textvariable=active_auth_file_display_var, wraplength=180) # 允许换行
-    lbl_current_auth_dynamic.pack(side=tk.LEFT, fill=tk.X, expand=True)
-    _update_active_auth_display() # 初始化时更新一次
+
 
     # 添加一个占位符Frame以推高左侧内容 (如果需要消除底部所有空白)
     spacer_frame_left = ttk.Frame(left_frame_container)
@@ -1580,9 +2021,9 @@ def build_gui(root: tk.Tk):
     middle_frame_container = ttk.Frame(main_paned_window, padding="5")
     main_paned_window.add(middle_frame_container, weight=2) # 调整中栏初始权重
     middle_frame_container.columnconfigure(0, weight=1)
-    middle_frame_container.rowconfigure(0, weight=1) 
-    middle_frame_container.rowconfigure(1, weight=0) 
-    # middle_frame_container.rowconfigure(2, weight=0) # 认证管理已移走
+    middle_frame_container.rowconfigure(0, weight=1)
+    middle_frame_container.rowconfigure(1, weight=0)
+    middle_frame_container.rowconfigure(2, weight=0) # 认证管理现在在中栏
 
     middle_current_row = 0
     pid_section_frame = ttk.Frame(middle_frame_container)
@@ -1596,7 +2037,7 @@ def build_gui(root: tk.Tk):
     pid_list_lbl_frame_ref.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=2, pady=2)
     pid_list_lbl_frame_ref.columnconfigure(0, weight=1)
     pid_list_lbl_frame_ref.rowconfigure(0, weight=1)
-    pid_listbox_widget = tk.Listbox(pid_list_lbl_frame_ref, height=7, exportselection=False) 
+    pid_listbox_widget = tk.Listbox(pid_list_lbl_frame_ref, height=4, exportselection=False)
     pid_listbox_widget.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
     scrollbar = ttk.Scrollbar(pid_list_lbl_frame_ref, orient="vertical", command=pid_listbox_widget.yview)
     scrollbar.grid(row=0, column=1, sticky="ns", padx=(0,5), pady=5)
@@ -1613,10 +2054,7 @@ def build_gui(root: tk.Tk):
     btn_stop_pid.grid(row=0, column=1, sticky="ew", padx=(2,0))
     widgets_to_translate.append({"widget": btn_stop_pid, "key": "stop_selected_pid_btn"})
     
-    # Test Proxy Connectivity Button
-    btn_test_proxy = ttk.Button(pid_buttons_frame, text="", command=test_proxy_connectivity_gui)
-    btn_test_proxy.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(3,0)) # Place below query/stop
-    widgets_to_translate.append({"widget": btn_test_proxy, "key": "test_proxy_btn"})
+    # 代理测试按钮已移至代理配置部分，此处不再重复
 
     kill_custom_frame = ttk.LabelFrame(middle_frame_container, text="")
     kill_custom_frame.grid(row=middle_current_row, column=0, sticky="ew", padx=2, pady=5)
@@ -1628,6 +2066,24 @@ def build_gui(root: tk.Tk):
     btn_kill_custom_pid = ttk.Button(kill_custom_frame, text="", command=kill_custom_pid_gui)
     btn_kill_custom_pid.pack(side=tk.LEFT, padx=5, pady=5)
     widgets_to_translate.append({"widget": btn_kill_custom_pid, "key": "kill_custom_pid_btn"})
+
+    # 认证文件管理 (移到中栏PID终止功能下方)
+    auth_section_middle = ttk.LabelFrame(middle_frame_container, text="")
+    auth_section_middle.grid(row=middle_current_row, column=0, sticky="ew", padx=2, pady=5)
+    widgets_to_translate.append({"widget": auth_section_middle, "key": "auth_files_management", "property": "text"})
+    middle_current_row += 1
+    btn_manage_auth_middle = ttk.Button(auth_section_middle, text="", command=manage_auth_files_gui)
+    btn_manage_auth_middle.pack(fill=tk.X, padx=5, pady=5)
+    widgets_to_translate.append({"widget": btn_manage_auth_middle, "key": "manage_auth_files_btn"})
+
+    # 显示当前认证文件
+    auth_display_frame = ttk.Frame(auth_section_middle)
+    auth_display_frame.pack(fill=tk.X, padx=5, pady=(0,5))
+    lbl_current_auth_static = ttk.Label(auth_display_frame, text="")
+    lbl_current_auth_static.pack(side=tk.LEFT)
+    widgets_to_translate.append({"widget": lbl_current_auth_static, "key": "current_auth_file_display_label"})
+    lbl_current_auth_dynamic = ttk.Label(auth_display_frame, textvariable=active_auth_file_display_var, wraplength=180)
+    lbl_current_auth_dynamic.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     # --- 右栏 Frame --- 
     right_frame_container = ttk.Frame(main_paned_window, padding="5")
@@ -1696,6 +2152,33 @@ def _get_launch_parameters() -> Optional[Dict[str, Any]]:
 def on_app_close_main():
     # 保存当前配置
     save_config()
+
+    # Attempt to stop LLM service if it's running
+    if is_llm_service_running():
+        logger.info("LLM service is running. Attempting to stop it before exiting GUI.")
+        # We can call stop_llm_service_gui directly, but it shows a confirmation.
+        # For closing, we might want a more direct stop or a specific "closing" stop.
+        # For now, let's try a direct stop without user confirmation for this specific path.
+        popen = llm_service_process_info.get("popen")
+        service_name = get_text(llm_service_process_info.get("service_name_key", "llm_service_name_key"))
+        if popen:
+            try:
+                logger.info(f"Sending SIGINT to {service_name} (PID: {popen.pid}) during app close.")
+                if platform.system() == "Windows":
+                    popen.terminate() # TerminateProcess on Windows
+                else:
+                    popen.send_signal(signal.SIGINT)
+                
+                # Give it a very short time to exit, don't block GUI closing for too long
+                popen.wait(timeout=1.5)
+                logger.info(f"{service_name} (PID: {popen.pid}) hopefully stopped during app close.")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"{service_name} (PID: {popen.pid}) did not stop quickly during app close. May need manual cleanup.")
+                popen.kill() # Force kill if it didn't stop
+            except Exception as e:
+                logger.error(f"Error stopping {service_name} during app close: {e}")
+            finally:
+                llm_service_process_info["popen"] = None # Clear it
     
     # 服务都是在独立终端中启动的，所以只需确认用户是否想关闭GUI
     if messagebox.askyesno(get_text("confirm_quit_title"), get_text("confirm_quit_message"), parent=root_widget):
